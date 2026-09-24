@@ -9,6 +9,9 @@ import {
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 function App() {
+  // Définition dynamique de l'adresse du backend (Vercel Production ou Local)
+  const API_URL = process.env.REACT_APP_API_URL || 'https://smart-medicine-forecasting.onrender.com';
+
   const [medicaments, setMedicaments] = useState([]);
   const [etablissements, setEtablissements] = useState([]);
   const [stocks, setStocks] = useState(null);
@@ -40,9 +43,9 @@ function App() {
   const fetchInitialData = async () => {
     try {
       const [resMeds, resEtabs, resMouvements] = await Promise.all([
-        axios.get('http://127.0.0.1:8000/medicaments'),
-        axios.get('http://127.0.0.1:8000/etablissements'),
-        axios.get('http://127.0.0.1:8000/mouvements')
+        axios.get(`${API_URL}/medicaments`),
+        axios.get(`${API_URL}/etablissements`),
+        axios.get(`${API_URL}/mouvements`)
       ]);
       
       setMedicaments(resMeds.data || []);
@@ -70,8 +73,8 @@ function App() {
   const refreshStocksAndHistory = async () => {
     try {
       const [resStocks, resMouvements] = await Promise.all([
-        axios.get('http://127.0.0.1:8000/stocks'),
-        axios.get('http://127.0.0.1:8000/mouvements')
+        axios.get(`${API_URL}/stocks`),
+        axios.get(`${API_URL}/mouvements`)
       ]);
       setStocks(resStocks.data || []);
       setMouvements(resMouvements.data || []);
@@ -118,7 +121,7 @@ function App() {
   const handleClearHistory = async () => {
     if (window.confirm("Voulez-vous vraiment supprimer tout l'historique des mouvements ?")) {
       try {
-        await axios.delete('http://127.0.0.1:8000/mouvements');
+        await axios.delete(`${API_URL}/mouvements`);
         setMouvements([]);
         toast.success("Historique effacé avec succès");
       } catch (err) {
@@ -132,14 +135,14 @@ function App() {
     e.preventDefault();
     setLoadingPredict(true);
     try {
-      const resPredict = await axios.post('http://127.0.0.1:8000/predict', {
+      const resPredict = await axios.post(`${API_URL}/predict`, {
         medicament_id: Number(selectedMed),
         etablissement_id: Number(selectedEtab),
         mois: Number(mois)
       });
       setPrediction(resPredict.data.quantite_prevue);
 
-      const resStocks = await axios.get('http://127.0.0.1:8000/stocks');
+      const resStocks = await axios.get(`${API_URL}/stocks`);
       setStocks(resStocks.data || []);
       toast.success("Prévision calculée !");
 
@@ -156,7 +159,7 @@ function App() {
     setLoadingEntree(true);
 
     try {
-      await axios.post('http://127.0.0.1:8000/stocks/mouvement', {
+      await axios.post(`${API_URL}/stocks/mouvement`, {
         medicament_id: Number(entreeMed),
         etablissement_id: Number(entreeEtab),
         quantite_ajoutee: Number(quantiteEntree)
@@ -176,7 +179,7 @@ function App() {
     setLoadingSortie(true);
 
     try {
-      await axios.post('http://127.0.0.1:8000/stocks/mouvement', {
+      await axios.post(`${API_URL}/stocks/mouvement`, {
         medicament_id: Number(sortieMed),
         etablissement_id: Number(sortieEtab),
         quantite_ajoutee: -Number(quantiteSortie)
