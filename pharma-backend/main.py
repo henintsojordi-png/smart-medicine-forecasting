@@ -8,8 +8,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Smart Medicine Forecasting API")
+app = FastAPI(
+    title="Smart Medicine Forecasting API",
+    description="API de prévision et de gestion de stock de médicaments",
+    version="1.0.0"
+)
 
+# Configuration CORS pour autoriser Vercel, le dev local et tous les clients
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,18 +23,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configuration PostgreSQL local
-DB_CONFIG = {
-    "dbname": "pharma_predict",
-    "user": "postgres",
-    "password": "henintso56",
-    "host": "localhost",
-    "port": "5432"
-}
+# Connexion dynamique : Récupère la variable d'environnement de Render si disponible, sinon prend le local
+DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("INTERNAL_DATABASE_URL")
 
 def get_db_connection():
     try:
-        conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
+        if DATABASE_URL:
+            # Connexion pour la base PostgreSQL Render
+            conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        else:
+            # Fallback pour le développement local
+            conn = psycopg2.connect(
+                dbname="pharma_predict",
+                user="postgres",
+                password="henintso56",
+                host="localhost",
+                port="5432",
+                cursor_factory=RealDictCursor
+            )
         return conn
     except Exception as e:
         print(f"\n❌ ERREUR CONNEXION POSTGRESQL : {e}\n")
@@ -70,6 +81,16 @@ class StockUpdate(BaseModel):
     medicament_id: int
     etablissement_id: int
     quantite_ajoutee: int
+
+
+@app.get("/")
+def read_root():
+    return {"message": "API Smart Medicine Forecasting opérationnelle"}
+
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 
 
 @app.get("/medicaments")
@@ -223,7 +244,8 @@ def get_mouvements():
         return res
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-       
+
+
 @app.delete("/mouvements")
 def supprimer_historique():
     conn = get_db_connection()
