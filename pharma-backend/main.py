@@ -23,14 +23,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Connexion dynamique : Récupère la variable d'environnement de Render si disponible, sinon prend le local
+# Connexion dynamique : Récupère la variable d'environnement de Render
 DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("INTERNAL_DATABASE_URL")
 
 def get_db_connection():
     try:
         if DATABASE_URL:
-            # Connexion pour la base PostgreSQL Render
-            conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+            # Sécurité pour SQLAlchemy / Psycopg2 si l'URL commence par postgres://
+            db_url = DATABASE_URL.replace("postgres://", "postgresql://", 1) if DATABASE_URL.startswith("postgres://") else DATABASE_URL
+            conn = psycopg2.connect(db_url, cursor_factory=RealDictCursor)
         else:
             # Fallback pour le développement local
             conn = psycopg2.connect(
@@ -46,13 +47,34 @@ def get_db_connection():
         print(f"\n❌ ERREUR CONNEXION POSTGRESQL : {e}\n")
         return None
 
-# Initialisation automatique de la table d'historique
+# Initialisation automatique de TOUTES les tables et insertion de données de test
 def init_db():
     conn = get_db_connection()
     if conn:
         try:
             with conn.cursor() as cur:
+                # 1. Création des tables
                 cur.execute("""
+                    CREATE TABLE IF NOT EXISTS medicaments (
+                        id SERIAL PRIMARY KEY,
+                        nom VARCHAR(100) NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS etablissements (
+                        id SERIAL PRIMARY KEY,
+                        nom VARCHAR(100) NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS stocks (
+                        id SERIAL PRIMARY KEY,
+                        medicament_id INT NOT NULL,
+                        etablissement_id INT NOT NULL,
+                        quantite_disponible INT DEFAULT 0,
+                        seuil_alerte INT DEFAULT 15,
+                        FOREIGN KEY (medicament_id) REFERENCES medicaments(id) ON DELETE CASCADE,
+                        FOREIGN KEY (etablissement_id) REFERENCES etablissements(id) ON DELETE CASCADE
+                    );
+
                     CREATE TABLE IF NOT EXISTS mouvements_stock (
                         id SERIAL PRIMARY KEY,
                         medicament_id INT NOT NULL,
@@ -63,9 +85,40 @@ def init_db():
                     );
                 """)
                 conn.commit()
+
+                # 2. Insertion de données initiales si les tables sont vides
+                cur.execute("SELECT COUNT(*) AS count FROM medicaments;")
+                if cur.fetchone()['count'] == 0:
+                    cur.execute("""
+                        INSERT INTO medicaments (nom) VALUES 
+                        ('Paracétamol 500mg'), 
+                        ('Amoxicilline 1g'), 
+                        ('Ibuprofène 400mg');
+                    """)
+
+                cur.execute("SELECT COUNT(*) AS count FROM etablissements;")
+                if cur.fetchone()['count'] == 0:
+                    cur.execute("""
+                        INSERT INTO etablissements (nom) VALUES 
+                        ('Hôpital Central'), 
+                        ('Pharmacie Principale'), 
+                        ('Centre de Santé A');
+                    """)
+
+                cur.execute("SELECT COUNT(*) AS count FROM stocks;")
+                if cur.fetchone()['count'] == 0:
+                    cur.execute("""
+                        INSERT INTO stocks (medicament_id, etablissement_id, quantite_disponible, seuil_alerte) VALUES 
+                        (1, 1, 50, 15),
+                        (2, 1, 10, 15),
+                        (3, 2, 120, 20);
+                    """)
+
+                conn.commit()
             conn.close()
+            print("✅ Base de données initialisée avec succès !")
         except Exception as e:
-            print(f"Erreur init DB : {e}")
+            print(f"❌ Erreur init DB : {e}")
 
 init_db()
 
@@ -186,14 +239,12 @@ def enregistrer_mouvement(data: StockUpdate):
             stock_existant = cur.fetchone()
 
             if stock_existant:
-                # Si le stock existe, on additionne ou soustrait (sans descendre en dessous de 0)
                 cur.execute("""
                     UPDATE stocks 
                     SET quantite_disponible = GREATEST(0, quantite_disponible + %s)
                     WHERE medicament_id = %s AND etablissement_id = %s;
                 """, (data.quantite_ajoutee, data.medicament_id, data.etablissement_id))
             else:
-                # Si le stock n'existe pas encore et qu'on fait un ajout (+)
                 nouvelle_qte = max(0, data.quantite_ajoutee)
                 cur.execute("""
                     INSERT INTO stocks (medicament_id, etablissement_id, quantite_disponible, seuil_alerte)
