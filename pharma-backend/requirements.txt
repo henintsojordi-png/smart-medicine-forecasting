@@ -5,4 +5,4 @@ pandas
 joblib
 scikit-learn
 python-dotenv
-passlib[bcrypt]
+bcrypt

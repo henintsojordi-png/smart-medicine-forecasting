@@ -1,19 +1,16 @@
 import os
 import joblib
+import bcrypt
 import pandas as pd
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
-from passlib.context import CryptContext
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 load_dotenv()
-
-# Configuration du hachage de mot de passe avec Bcrypt
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 app = FastAPI(
     title="Smart Medicine Forecasting API - Pharmacie Unique",
@@ -53,6 +50,14 @@ def get_db_connection():
     except Exception as e:
         print(f"\n❌ ERREUR CONNEXION POSTGRESQL : {e}\n")
         return None
+
+# Fonctions utilitaires Bcrypt directes
+def hash_password(password: str) -> str:
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
 
 # Modèles Pydantic
 class LoginInput(BaseModel):
@@ -104,23 +109,20 @@ def init_db():
                 """)
                 conn.commit()
 
-                # Insérer / Vérifier le compte SuperAdmin
-                cur.execute("SELECT * FROM utilisateurs WHERE username = 'superadmin';")
-                if not cur.fetchone():
-                    hashed_superadmin = pwd_context.hash("superadmin123")
-                    cur.execute(
-                        "INSERT INTO utilisateurs (username, password_hash, role) VALUES (%s, %s, %s);",
-                        ("superadmin", hashed_superadmin, "superadmin")
-                    )
+                # Forcer la réinitialisation propre des comptes par défaut avec le nouveau hachage bcrypt
+                hashed_superadmin = hash_password("superadmin123")
+                cur.execute("""
+                    INSERT INTO utilisateurs (username, password_hash, role)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash;
+                """, ("superadmin", hashed_superadmin, "superadmin"))
 
-                # Insérer / Vérifier le compte Pharmacie
-                cur.execute("SELECT * FROM utilisateurs WHERE username = 'pharmacie';")
-                if not cur.fetchone():
-                    hashed_pharmacie = pwd_context.hash("pharma123")
-                    cur.execute(
-                        "INSERT INTO utilisateurs (username, password_hash, role) VALUES (%s, %s, %s);",
-                        ("pharmacie", hashed_pharmacie, "admin_pharmacie")
-                    )
+                hashed_pharmacie = hash_password("pharma123")
+                cur.execute("""
+                    INSERT INTO utilisateurs (username, password_hash, role)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash;
+                """, ("pharmacie", hashed_pharmacie, "admin_pharmacie"))
 
                 # Données médicaments par défaut
                 cur.execute("SELECT COUNT(*) AS count FROM medicaments;")
@@ -144,7 +146,7 @@ def init_db():
 
                 conn.commit()
             conn.close()
-            print("✅ Base de données initialisée avec succès !")
+            print("✅ Base de données et comptes réinitialisés avec succès (Bcrypt Native) !")
         except Exception as e:
             print(f"❌ Erreur init DB : {e}")
 
@@ -161,19 +163,22 @@ def read_root():
 def health_check():
     return {"status": "ok"}
 
-# ROUTE LOGIN SÉCURISÉE WITH BCRYPT
+# ROUTE LOGIN SÉCURISÉE AVEC BCRYPT NATIVE
 @app.post("/login")
 def login(credentials: LoginInput):
     conn = get_db_connection()
     if not conn:
         raise HTTPException(status_code=500, detail="Erreur de connexion BDD")
     try:
+        username_clean = credentials.username.strip().lower()
+        password_clean = credentials.password.strip()
+
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM utilisateurs WHERE username = %s;", (credentials.username,))
+            cur.execute("SELECT * FROM utilisateurs WHERE LOWER(username) = %s;", (username_clean,))
             user = cur.fetchone()
         conn.close()
 
-        if not user or not pwd_context.verify(credentials.password, user['password_hash']):
+        if not user or not verify_password(password_clean, user['password_hash']):
             raise HTTPException(status_code=401, detail="Identifiants incorrects")
 
         return {
