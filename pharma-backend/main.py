@@ -14,8 +14,8 @@ load_dotenv()
 
 app = FastAPI(
     title="Smart Medicine Forecasting API - Pharmacie Unique",
-    description="API de gestion de stock et de prévision pour pharmacie",
-    version="1.0.0"
+    description="API de gestion de stock, prévision et administration d'utilisateurs",
+    version="1.1.0"
 )
 
 app.add_middleware(
@@ -51,7 +51,7 @@ def get_db_connection():
         print(f"\n❌ ERREUR CONNEXION POSTGRESQL : {e}\n")
         return None
 
-# Fonctions utilitaires Bcrypt directes
+# Utilitaires Bcrypt
 def hash_password(password: str) -> str:
     salt = bcrypt.gensalt()
     return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
@@ -63,6 +63,11 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 class LoginInput(BaseModel):
     username: str
     password: str
+
+class UserCreateInput(BaseModel):
+    username: str
+    password: str
+    role: str = "admin_pharmacie"
 
 class StockUpdate(BaseModel):
     medicament_id: int
@@ -77,7 +82,6 @@ def init_db():
     if conn:
         try:
             with conn.cursor() as cur:
-                # Création des tables
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS utilisateurs (
                         id SERIAL PRIMARY KEY,
@@ -109,7 +113,7 @@ def init_db():
                 """)
                 conn.commit()
 
-                # Forcer la réinitialisation propre des comptes par défaut avec le nouveau hachage bcrypt
+                # Upsert SuperAdmin
                 hashed_superadmin = hash_password("superadmin123")
                 cur.execute("""
                     INSERT INTO utilisateurs (username, password_hash, role)
@@ -117,6 +121,7 @@ def init_db():
                     ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash;
                 """, ("superadmin", hashed_superadmin, "superadmin"))
 
+                # Upsert Pharmacie
                 hashed_pharmacie = hash_password("pharma123")
                 cur.execute("""
                     INSERT INTO utilisateurs (username, password_hash, role)
@@ -124,7 +129,7 @@ def init_db():
                     ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash;
                 """, ("pharmacie", hashed_pharmacie, "admin_pharmacie"))
 
-                # Données médicaments par défaut
+                # Données médicaments
                 cur.execute("SELECT COUNT(*) AS count FROM medicaments;")
                 if cur.fetchone()['count'] == 0:
                     cur.execute("""
@@ -134,7 +139,7 @@ def init_db():
                         ('Ibuprofène 400mg');
                     """)
 
-                # Stocks par défaut
+                # Stocks
                 cur.execute("SELECT COUNT(*) AS count FROM stocks;")
                 if cur.fetchone()['count'] == 0:
                     cur.execute("""
@@ -146,7 +151,7 @@ def init_db():
 
                 conn.commit()
             conn.close()
-            print("✅ Base de données et comptes réinitialisés avec succès (Bcrypt Native) !")
+            print("✅ Base de données initialisée avec succès !")
         except Exception as e:
             print(f"❌ Erreur init DB : {e}")
 
@@ -163,7 +168,7 @@ def read_root():
 def health_check():
     return {"status": "ok"}
 
-# ROUTE LOGIN SÉCURISÉE AVEC BCRYPT NATIVE
+# LOGIN
 @app.post("/login")
 def login(credentials: LoginInput):
     conn = get_db_connection()
@@ -191,6 +196,76 @@ def login(credentials: LoginInput):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# GESTION DES UTILISATEURS (SUPERADMIN)
+@app.get("/utilisateurs")
+def get_utilisateurs():
+    conn = get_db_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erreur BDD")
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, username, role FROM utilisateurs ORDER BY id ASC;")
+            users = cur.fetchall()
+        conn.close()
+        return users
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/utilisateurs")
+def create_utilisateur(user: UserCreateInput):
+    conn = get_db_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erreur BDD")
+    try:
+        username_clean = user.username.strip().lower()
+        if not username_clean or not user.password.strip():
+            raise HTTPException(status_code=400, detail="Nom d'utilisateur et mot de passe requis")
+
+        hashed_pwd = hash_password(user.password.strip())
+
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM utilisateurs WHERE LOWER(username) = %s;", (username_clean,))
+            if cur.fetchone():
+                raise HTTPException(status_code=400, detail="Cet utilisateur existe déjà")
+
+            cur.execute("""
+                INSERT INTO utilisateurs (username, password_hash, role)
+                VALUES (%s, %s, %s) RETURNING id, username, role;
+            """, (username_clean, hashed_pwd, user.role))
+            new_user = cur.fetchone()
+            conn.commit()
+        conn.close()
+        return new_user
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/utilisateurs/{user_id}")
+def delete_utilisateur(user_id: int):
+    conn = get_db_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erreur BDD")
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT username FROM utilisateurs WHERE id = %s;", (user_id,))
+            target_user = cur.fetchone()
+            
+            if not target_user:
+                raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
+            if target_user['username'] == 'superadmin':
+                raise HTTPException(status_code=400, detail="Impossible de supprimer le compte superadmin principal")
+
+            cur.execute("DELETE FROM utilisateurs WHERE id = %s;", (user_id,))
+            conn.commit()
+        conn.close()
+        return {"message": "Utilisateur supprimé avec succès"}
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# STOCKS & MÉDICAMENTS
 @app.get("/medicaments")
 def get_medicaments():
     conn = get_db_connection()
