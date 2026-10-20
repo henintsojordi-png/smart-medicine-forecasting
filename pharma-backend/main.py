@@ -72,7 +72,7 @@ def init_db():
     if conn:
         try:
             with conn.cursor() as cur:
-                # Table Utilisateurs avec Rôle
+                # Création des tables
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS utilisateurs (
                         id SERIAL PRIMARY KEY,
@@ -104,17 +104,18 @@ def init_db():
                 """)
                 conn.commit()
 
-                # Création des deux comptes par défaut si la table est vide
-                cur.execute("SELECT COUNT(*) AS count FROM utilisateurs;")
-                if cur.fetchone()['count'] == 0:
-                    # 1. Compte SuperAdmin (Toi)
+                # Insérer / Vérifier le compte SuperAdmin
+                cur.execute("SELECT * FROM utilisateurs WHERE username = 'superadmin';")
+                if not cur.fetchone():
                     hashed_superadmin = pwd_context.hash("superadmin123")
                     cur.execute(
                         "INSERT INTO utilisateurs (username, password_hash, role) VALUES (%s, %s, %s);",
                         ("superadmin", hashed_superadmin, "superadmin")
                     )
 
-                    # 2. Compte Admin Pharmacie (Le client)
+                # Insérer / Vérifier le compte Pharmacie
+                cur.execute("SELECT * FROM utilisateurs WHERE username = 'pharmacie';")
+                if not cur.fetchone():
                     hashed_pharmacie = pwd_context.hash("pharma123")
                     cur.execute(
                         "INSERT INTO utilisateurs (username, password_hash, role) VALUES (%s, %s, %s);",
@@ -143,7 +144,7 @@ def init_db():
 
                 conn.commit()
             conn.close()
-            print("✅ Base de données initialisée avec succès (Comptes SuperAdmin et Pharmacie créés) !")
+            print("✅ Base de données initialisée avec succès !")
         except Exception as e:
             print(f"❌ Erreur init DB : {e}")
 
@@ -160,7 +161,7 @@ def read_root():
 def health_check():
     return {"status": "ok"}
 
-# ROUTE LOGIN SÉCURISÉE AVEC ROLE
+# ROUTE LOGIN SÉCURISÉE WITH BCRYPT
 @app.post("/login")
 def login(credentials: LoginInput):
     conn = get_db_connection()
