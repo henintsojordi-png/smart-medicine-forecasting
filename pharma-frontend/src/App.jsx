@@ -24,7 +24,7 @@ const styles = {
 };
 
 function App() {
-  const API_URL = process.env.REACT_APP_API_URL || 'https://smart-medicine-forecasting.onrender.com';
+  const API_URL = import.meta.env.VITE_API_URL || 'https://smart-medicine-forecasting.onrender.com';
 
   const [currentUser, setCurrentUser] = useState(() => {
     const saved = localStorage.getItem('pharma_user');
@@ -461,4 +461,99 @@ function App() {
         </div>
 
         <div style={styles.card}>
-          <div style={{ display: 'flex', justifyContent
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+            <h2 style={{ ...styles.cardHeader, margin: 0 }}><BarChart2 size={22} /> État des Stocks</h2>
+            <button onClick={refreshStocksAndHistory} style={styles.btnPrimary}><RefreshCw size={14} /></button>
+          </div>
+          <div style={{ height: '240px', width: '100%' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="nom" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="Stock Reel" fill="#059669" />
+                <Bar dataKey="Seuil Alerte" fill="#ef4444" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      <div style={styles.grid2}>
+        <div style={styles.card}>
+          <h2 style={styles.cardHeader}><PlusCircle size={22} /> Entrée de Stock (Réapprovisionnement)</h2>
+          <form onSubmit={handleEntreeSubmit}>
+            <div style={{ marginBottom: '15px' }}>
+              <label>Médicament :</label>
+              <select value={entreeMed} onChange={(e) => setEntreeMed(e.target.value)} style={styles.input}>
+                {medicaments.map(m => <option key={m.id} value={m.id}>{m.nom}</option>)}
+              </select>
+            </div>
+            <div style={{ marginBottom: '15px' }}>
+              <label>Quantité reçue :</label>
+              <input type="number" min="1" value={quantiteEntree} onChange={(e) => setQuantiteEntree(e.target.value)} style={styles.input} />
+            </div>
+            <button type="submit" disabled={loadingEntree} style={{ ...styles.btnPrimary, width: '100%' }}>
+              {loadingEntree ? 'Enregistrement...' : 'Valider Entrée'}
+            </button>
+          </form>
+        </div>
+
+        <div style={styles.card}>
+          <h2 style={styles.cardHeader}><MinusCircle size={22} /> Sortie de Stock (Vente / Distribution)</h2>
+          <form onSubmit={handleSortieSubmit}>
+            <div style={{ marginBottom: '15px' }}>
+              <label>Médicament :</label>
+              <select value={sortieMed} onChange={(e) => setSortieMed(e.target.value)} style={styles.input}>
+                {medicaments.map(m => <option key={m.id} value={m.id}>{m.nom}</option>)}
+              </select>
+            </div>
+            <div style={{ marginBottom: '15px' }}>
+              <label>Quantité distribuée :</label>
+              <input type="number" min="1" value={quantiteSortie} onChange={(e) => setQuantiteSortie(e.target.value)} style={styles.input} />
+            </div>
+            <button type="submit" disabled={loadingSortie} style={{ ...styles.btnPrimary, width: '100%', backgroundColor: '#dc2626' }}>
+              {loadingSortie ? 'Enregistrement...' : 'Valider Sortie'}
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <div style={styles.card}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+          <h2 style={{ ...styles.cardHeader, margin: 0 }}><History size={22} /> Historique des Mouvements</h2>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button onClick={exportToCSV} style={styles.btnPrimary}><Download size={14} /> Export CSV</button>
+            <button onClick={handleClearHistory} style={styles.btnDanger}><Trash2 size={14} /> Effacer Historique</button>
+          </div>
+        </div>
+        <table style={styles.table}>
+          <thead>
+            <tr>
+              <th style={styles.th}>Date</th>
+              <th style={styles.th}>Type</th>
+              <th style={styles.th}>Médicament</th>
+              <th style={styles.th}>Quantité</th>
+            </tr>
+          </thead>
+          <tbody>
+            {mouvements.map(m => (
+              <tr key={m.id}>
+                <td style={styles.td}>{new Date(m.date_mouvement).toLocaleString('fr-FR')}</td>
+                <td style={{ ...styles.td, fontWeight: 'bold', color: m.type_mouvement === 'ENTREE' ? '#059669' : '#dc2626' }}>
+                  {m.type_mouvement}
+                </td>
+                <td style={styles.td}>{m.medicament}</td>
+                <td style={styles.td}>{m.type_mouvement === 'ENTREE' ? `+${m.quantite}` : `-${m.quantite}`}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+export default App;
